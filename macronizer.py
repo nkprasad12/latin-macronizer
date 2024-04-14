@@ -204,7 +204,7 @@ prefixeswithshortj = ("bij", "fidej", "Foroj", "foroj", "ju_rej", "multij", "pra
 
 
 class Token:
-    def __init__(self, text):
+    def __init__(self, text, start: int = -1):
         self.tag = ""
         self.lemma = ""
         self.accented = [""]
@@ -217,9 +217,12 @@ class Token:
         self.startssentence = False
         self.endssentence = False
         self.isunknown = False
+        self.start = start
     # enddef
 
     def split(self, pos, enclitic):
+        newtokena = Token(self.text[:-pos], start=self.start)
+        newtokenb = Token(self.text[-pos:], start=self.start)
         newtokena = Token(self.text[:-pos])
         newtokenb = Token(self.text[-pos:])
         newtokena.startssentence = self.startssentence
@@ -431,9 +434,17 @@ class Tokenization:
                         savedencliticbearer = None
                 if token.endssentence:
                     totaggerfile.write("\n")
+        # NITIN
+        # with codecs.open(totaggerfname, "r", "utf8") as totaggerfile:
+        #     print('=========\nTo Tagger File:\n===========')
+        #     print(totaggerfile.read())
         rftagger_model = os.path.join(os.path.dirname(__file__), 'rftagger-ldt.model')
         rft_command = "%s/rft-annotate -s -q %s %s %s" % (RFTAGGER_DIR, rftagger_model, totaggerfname, fromtaggerfname)
         exitcode = os.system(rft_command)
+        # NITIN print('Second pass\n========')
+        # with codecs.open(fromtaggerfname, "r", "utf8") as fromtaggerfname:
+        #     print('=========\nFrom Tagger File:\n===========')
+        #     print(fromtaggerfname.read())
         if exitcode != 0:
             raise Exception("Failed to execute: %s" % rft_command)
         with open(fromtaggerfname, 'r', encoding='utf-8') as fromtaggerfile:
@@ -477,18 +488,25 @@ class Tokenization:
             wordform = toascii(token.text)
             best_lemma = "-"
             max_freq = -1
+            corpus_lemmata = set()
+            lex_lemmata = set()
             if wordform in wordform_to_corpus_lemmas:
                 for corpus_lemma in wordform_to_corpus_lemmas[wordform]:
+                    corpus_lemmata.add(corpus_lemma)
                     if word_lemma_freq[(wordform, corpus_lemma)] > max_freq:
                         max_freq = word_lemma_freq[(wordform, corpus_lemma)]
                         best_lemma = corpus_lemma
             elif wordform.lower() in wordlist.formtolemmas:
                 for lex_lemma in wordlist.formtolemmas[wordform.lower()]:
+                    lex_lemmata.add(lex_lemma)
                     if lemma_frequency.get(lex_lemma, 0) > max_freq:
                         max_freq = lemma_frequency.get(lex_lemma, 0)
                         best_lemma = lex_lemma
             # endif
             token.lemma = best_lemma
+            token.corpus_lemmata = corpus_lemmata
+            token.lex_lemmata = lex_lemmata
+            token.possible_lemmata = len(corpus_lemmata) + len(lex_lemmata)
     # enddef
 
     def getaccents(self, wordlist):
@@ -527,6 +545,7 @@ class Tokenization:
             elif len(set(wordlist.formtoaccenteds[wordform])) == 1:
                 token.accented = [wordlist.formtoaccenteds[wordform][0]]
             elif wordform in wordlist.formtotaglemmaaccents:
+                # NITIN: This is the part where we're disambiguating.
                 candidates = []
                 for (lextag, lexlemma, accented) in wordlist.formtotaglemmaaccents[wordform]:
                     # Prefer lemmas with same capitalization as the token, unless the token is at
